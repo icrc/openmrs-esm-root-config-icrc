@@ -1,0 +1,56 @@
+{
+  "name": "@icrc/esm-icrc-overrides-app",
+  "version": "1.0.3",
+  "description": "A javascript module for setting up and configuring your SPA ",
+  "main": "dist/openmrs-esm-icrc-overrides.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "start": "webpack-dev-server",
+    "lint": "eslint src",
+    "build": "npm run clean && webpack --mode production && webpack",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "browserslist": [
+    "extends browserslist-config-openmrs"
+  ],
+  "keywords": [
+    "openmrs",
+    "microfrontends"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/icrc/openmrs-esm-root-config.git"
+  },
+  "homepage": "https://github.com/icrc/openmrs-esm-root-config#readme",
+  "bugs": {
+    "url": "https://github.com/icrc/openmrs-esm-root-config/issues"
+  },
+  "author": "",
+  "husky": {
+    "hooks": {
+      "pre-commit": "pretty-quick --staged && npm run lint"
+    }
+  },
+  "devDependencies": {
+    "clean-webpack-plugin": "^3.0.0",
+    "eslint": "^6.3.0",
+    "eslint-config-important-stuff": "^1.1.0",
+    "eslint-config-prettier": "^6.3.0",
+    "eslint-plugin-prettier": "^3.1.0",
+    "husky": "^4.2.5",
+    "prettier": "^1.18.2",
+    "pretty-quick": "^1.11.1",
+    "rimraf": "^3.0.0",
+    "systemjs-webpack-interop": "^1.1.0",
+    "webpack": "^4.39.3",
+    "webpack-cli": "^3.3.8",
+    "webpack-dev-server": "^3.8.0"
+  },
+  "dependencies": {
+    "@openmrs/esm-module-config": "^1.2.0"
+  }
+}

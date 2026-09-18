@@ -1,0 +1,145 @@
+name: Publish
+
+# Manual only. Every push to main used to publish a pre-release, which was the
+# bulk of the CI noise. The "release" input selects which path runs, so both
+# behaviours are still reachable:
+#   unchecked -> pre-release on the "pre" dist-tag (what the push trigger did)
+#   checked   -> full release: publishes latest, tags, opens the version-bump PR
+# Restore the push trigger below if automatic pre-releases are wanted again.
+#
+# The version itself comes from lerna.json, which every package inherits. The
+# "bump" input decides what main is lined up for once a release is out.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a full release (tag + latest). Leave unchecked for a pre-release."
+        type: boolean
+        default: false
+      bump:
+        description: "Version to prepare on main after the release. Ignored for a pre-release."
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - none
+        default: minor
+  # push:
+  #   branches: [main]
+
+permissions:
+  id-token: write # Required for npm trusted publishers (OIDC)
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Locate Yarn cache
+        id: yarn-cache
+        run: echo "dir=$(yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Yarn
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+
+      - name: Cache Turbo
+        uses: actions/cache@v4
+        with:
+          path: |
+            .turbo/cache
+            node_modules/.cache/turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
+
+      - name: Install dependencies
+        timeout-minutes: 10
+        run: yarn install --immutable
+
+      # Version must be set before building: @openmrs/webpack-config stamps the
+      # package version into each bundle.
+      - name: Set pre-release version
+        if: ${{ !inputs.release }}
+        run: |
+          BASE=$(node -e "const v=require('./lerna.json').version; if(!v) throw new Error('no version in lerna.json'); console.log(v)")
+          yarn lerna version "${BASE}-pre.${{ github.run_number }}" --no-git-tag-version --no-push --yes
+
+      - name: Run lint and type checks
+        timeout-minutes: 15
+        run: yarn verify
+
+      - name: Run tests
+        timeout-minutes: 15
+        run: yarn test
+
+      - name: Build
+        timeout-minutes: 20
+        run: yarn turbo run build --concurrency=2
+
+      - name: Publish pre-release
+        if: ${{ !inputs.release }}
+        timeout-minutes: 15
+        run: yarn workspaces foreach -A --no-private --topological exec npm publish --provenance --access public --tag pre
+
+      - name: Publish release
+        if: ${{ inputs.release }}
+        timeout-minutes: 15
+        run: yarn workspaces foreach -A --no-private --topological exec npm publish --provenance --access public
+
+      - name: Git Config
+        if: ${{ inputs.release }}
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+
+      - name: Git tag
+        if: ${{ inputs.release }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_PROJECT_VERSION=$(node -e "console.log(require('./lerna.json').version)")
+          git tag "$CURRENT_PROJECT_VERSION"
+          git push origin "$CURRENT_PROJECT_VERSION"
+          gh release create "$CURRENT_PROJECT_VERSION"
+
+      # Choose "patch" here to line main up for 4.0.1 rather than 4.1.0. Choose
+      # "none" to leave main untouched, which is what a hotfix released from a
+      # release branch wants.
+      - name: Move to next Version
+        if: ${{ inputs.release && inputs.bump != 'none' }}
+        run: yarn lerna version ${{ inputs.bump }} --no-git-tag-version --no-push --yes
+
+      # This step creates a PR to bump the version to the next minor snapshot.
+      # The PR must be accepted and merged to prepare main for the next release cycle.
+      - name: Create Branch and PR for next Version preparation
+        if: ${{ inputs.release && inputs.bump != 'none' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_PROJECT_VERSION=$(node -e "console.log(require('./lerna.json').version)")
+          BRANCH_NAME="move-to-$CURRENT_PROJECT_VERSION"
+          git push origin --delete "$BRANCH_NAME" 2>/dev/null || true
+          git checkout -b "$BRANCH_NAME"
+          git commit -a -m "[skip ci] change version to new snapshot $CURRENT_PROJECT_VERSION"
+          git push origin "$BRANCH_NAME"
+          gh pr create -B main -H "$BRANCH_NAME" --title "Update Version to $CURRENT_PROJECT_VERSION" --body 'Created by "Do Release" workflow'
+          echo "Please, accept the PR: Update Version to $CURRENT_PROJECT_VERSION"

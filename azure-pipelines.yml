@@ -1,0 +1,40 @@
+resources:
+  repositories:
+    - repository: vars
+      type: git
+      name: Pearlii/pearlii-pipelines-vars
+      ref: refs/heads/main
+    - repository: templates
+      type: git
+      name: DevOps Portal/pipelines-templates
+      ref: refs/heads/main
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - refs/heads/main
+  paths:
+    exclude:
+      - "**/*.md"
+      - azure-pipelines-release.yml
+
+name: $(date:yyyyMMdd)$(rev:-rr)
+
+pool:
+  name: OpenShift
+
+jobs:
+  - template: build/javascript/npm-build-jobs.yml@templates
+    parameters:
+      poolName: OpenShift
+      gitBranchToPublishOn: refs/heads/main
+      nodeJsVersion: 21.x
+      doSonarQubeScan: false
+      doCheckmarxScan: false
+      doCache: false
+      buildCommandLines:
+        - command: npm ci
+        - command: NODE_OPTIONS=--openssl-legacy-provider npm run build
+      deployCommandLines:
+        - command: NODE_OPTIONS=--openssl-legacy-provider npm publish

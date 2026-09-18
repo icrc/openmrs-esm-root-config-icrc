@@ -1,6 +1,6 @@
 {
   "name": "@icrc/esm-icrc-overrides-app",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "A javascript module for setting up and configuring your SPA ",
   "license": "BSD-3-Clause",
   "publishConfig": {

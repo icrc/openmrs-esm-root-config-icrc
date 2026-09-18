@@ -1,0 +1,77 @@
+# One-off workflow to create @icrc/esm-icrc-overrides-app on npmjs.org.
+#
+# Trusted publishing (OIDC) cannot create a package that does not exist yet: a
+# trusted publisher is configured on a package's settings page on npmjs.com, and
+# that page only exists once something has published the package. npmjs.org has no
+# "create package" button, so the very first publish has to use a token.
+#
+# Run this once, then configure the trusted publisher, revoke the token, delete
+# the NPM_TOKEN secret and delete this file. publish.yml then runs with no secret:
+#
+#   npm trust github @icrc/esm-icrc-overrides-app \
+#     --repo icrc/openmrs-esm-root-config-icrc \
+#     --file publish.yml --env npm --allow-publish
+#
+# NPM_TOKEN must be a classic Automation token. A granular token that bypasses
+# two-factor authentication loses direct publish capability in January 2027, and
+# npm trust refuses such tokens afterwards. Publishing with an ordinary token
+# fails with EOTP, because a runner cannot answer a two-factor prompt.
+name: Bootstrap npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "bootstrap" to confirm a token-authenticated publish'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 20
+    steps:
+      - name: Require explicit confirmation
+        if: inputs.confirm != 'bootstrap'
+        run: |
+          echo "::error::Refusing to run. Type 'bootstrap' in the confirm input to proceed."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Distinct prerelease identifier so a bootstrap version can never collide
+      # with, or sort above, the -pre.N versions that publish.yml produces.
+      - name: Set bootstrap version
+        run: npm version --no-git-tag-version "$(node -p "require('./package.json').version")-bootstrap.${{ github.run_number }}"
+
+      # Lint is skipped: this version exists only to create the package name, and
+      # is parked on the "bootstrap" dist-tag. Note npm still points "latest" at
+      # whatever is published first, so expect the first real release to correct it.
+      #
+      # NODE_OPTIONS is required because webpack 4 hashes with MD4, which modern
+      # OpenSSL refuses. prepublishOnly rebuilds, so the publish step needs it too.
+      - name: Build
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+        run: npm run build
+
+      - name: Publish bootstrap version
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag bootstrap

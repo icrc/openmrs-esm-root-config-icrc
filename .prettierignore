@@ -1,0 +1,7 @@
+# Generated or not prettier's business. Workflow YAML in particular must be
+# excluded: a prettier config that pins parser to typescript will try to parse
+# it as TypeScript and crash the pre-commit hook.
+.github/
+dist/
+node_modules/
+package-lock.json

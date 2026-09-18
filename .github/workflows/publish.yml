@@ -5,10 +5,14 @@ name: Publish
 #   release unchecked -> pre-release on the "pre" dist-tag
 #   release checked   -> publishes latest, tags the commit, opens the bump PR
 #
-# --provenance is deliberately absent. npm only attests packages published from
-# a public source repository, and a provenance failure cancels the publish
-# entirely rather than degrading. Add it to both publish steps once this
-# repository is public, which is the stated intention.
+# --provenance is deliberately absent, and adding it would achieve nothing.
+# Trusted publishing generates a provenance attestation on its own, so long as
+# the source repository is public, which this one now is. Confirmed on the sister
+# repository openmrs-esm-frontend-dependencies-icrc, where a release published
+# without the flag still carried an attestation.
+#
+# Provenance cannot be generated from a private repository at all, so making this
+# repository private again would silently drop attestation from future releases.
 on:
   workflow_dispatch:
     inputs:

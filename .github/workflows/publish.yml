@@ -1,0 +1,115 @@
+name: Publish
+
+# Manual only. The "release" input selects which path runs, and "bump" decides
+# what main is lined up for once a release is out:
+#   release unchecked -> pre-release on the "pre" dist-tag
+#   release checked   -> publishes latest, tags the commit, opens the bump PR
+#
+# --provenance is deliberately absent. npm only attests packages published from
+# a public source repository, and a provenance failure cancels the publish
+# entirely rather than degrading. Add it to both publish steps once this
+# repository is public, which is the stated intention.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a full release (tag + latest). Leave unchecked for a pre-release."
+        type: boolean
+        default: false
+      bump:
+        description: "Version to prepare on main after the release. Ignored for a pre-release."
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - none
+        default: minor
+
+permissions:
+  id-token: write # Required for npm trusted publishers (OIDC)
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Version must be set before building: the package name and version are
+      # baked into the bundle by set-public-path.
+      - name: Set pre-release version
+        if: ${{ !inputs.release }}
+        run: npm version --no-git-tag-version "$(node -p "require('./package.json').version")-pre.${{ github.run_number }}"
+
+      - name: Lint
+        run: npm run lint
+
+      # webpack 4 hashes with MD4, which modern OpenSSL refuses without this flag.
+      # prepublishOnly also runs the build, so npm publish inherits this env.
+      - name: Build
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+        run: npm run build
+
+      - name: Publish pre-release
+        if: ${{ !inputs.release }}
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+        run: npm publish --access public --tag pre
+
+      - name: Publish release
+        if: ${{ inputs.release }}
+        env:
+          NODE_OPTIONS: --openssl-legacy-provider
+        run: npm publish --access public
+
+      - name: Git Config
+        if: ${{ inputs.release }}
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+
+      - name: Git tag
+        if: ${{ inputs.release }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_PROJECT_VERSION=$(node -p "require('./package.json').version")
+          git tag "$CURRENT_PROJECT_VERSION"
+          git push origin "$CURRENT_PROJECT_VERSION"
+          gh release create "$CURRENT_PROJECT_VERSION"
+
+      - name: Move to next Version
+        if: ${{ inputs.release && inputs.bump != 'none' }}
+        run: npm version --no-git-tag-version ${{ inputs.bump }}
+
+      # This step creates a PR to bump the version to the next snapshot.
+      # The PR must be accepted and merged to prepare main for the next release cycle.
+      - name: Create Branch and PR for next Version preparation
+        if: ${{ inputs.release && inputs.bump != 'none' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_PROJECT_VERSION=$(node -p "require('./package.json').version")
+          BRANCH_NAME="move-to-$CURRENT_PROJECT_VERSION"
+          git push origin --delete "$BRANCH_NAME" 2>/dev/null || true
+          git checkout -b "$BRANCH_NAME"
+          git commit -a -m "[skip ci] change version to new snapshot $CURRENT_PROJECT_VERSION"
+          git push origin "$BRANCH_NAME"
+          gh pr create -B main -H "$BRANCH_NAME" --title "Update Version to $CURRENT_PROJECT_VERSION" --body 'Created by "Do Release" workflow'
+          echo "Please, accept the PR: Update Version to $CURRENT_PROJECT_VERSION"
